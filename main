@@ -1,0 +1,30 @@
+// Online C++ compiler to run C++ program online
+#include <iostream>
+
+class Bank_Tellers{
+    int Teller_ID;
+    string full_name;
+    string password;
+    int branch_code;
+    
+    void input() {
+        cin >> Teller_ID >> full_name >> branch_code;
+    }
+    void saveTeller(Teller t) {
+        ofstream file("tellers.dat", ios::binary | ios::app);
+        file.write((char*)&t,sizeof(t));
+        file.close();
+    }
+};
+string encrypt(string pass) {
+    for (int i = 0; i < pass.length(); i++) {
+        pass[i]  = pass[i] + 1;
+    }
+    return pass;
+}
+int main() {
+    // Write C++ code here
+    std::cout << "Try programiz.pro";
+    
+    return 0;
+}
