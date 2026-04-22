@@ -1,6 +1,236 @@
-// Online C++ compiler to run C++ program online
+//day 1-7 imported stuff throughout the days hopefully done with this!
 #include <iostream>
+#include <fstream>
+#include <cstring>
+#include <cstdlib>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+using namespace std;
 
+// database structure code
+// for the system use set up constants
+const int MAX_CUSTOMERS    = 500;
+const int MAX_TELLERS      = 50;
+const int MAX_TRANSACTIONS = 2000;
+const int MAX_BRANCHES     = 10;
+const char EKEY            = 'K'; // the encryption key
+
+// all of the account types that will interact
+const int SAVINGS = 0;
+const int CHEQUE = 1;
+const int FIXED = 2;
+const int STUDENT = 3;
+
+// Athe transactions within the system;
+
+const int DEPOSIT = 0;
+const int WITHDRAWAL = 1;
+const int TRANSFER = 2;
+
+//STRUCT BRANCHES and other details for question
+
+struct Branch {
+    char code[10];
+    char name[50];
+    char address[100];
+    char manager[50];
+};
+
+struct Teller {
+    char id[10];
+    char fullName[50];
+    char password[50]; // will be encrypted later
+    char branchCode[10];
+};
+// accounts - picking up from last left off
+struct Account {
+    char accountNumber[20];
+    char firstName[10];
+    char surname[50];
+    char idNumber[100];
+    char contact[50];
+    char email[10];
+    char address[50];
+    char dob[50];
+    int type; //the accounts type, dont forget!
+    double balance;
+    char branchCode[10];
+    char pin[10]; //encryoted
+    bool locked;
+    int faledAttempts;
+};
+
+struct Transaction {
+    char txnID[15];
+    char accountNumber[25];
+    int type;
+    double amount;
+    double balanceBefore;
+    double balanceAfter;
+    char dateTime[25];
+    char targetAccount[25];
+    char branchCode[10];
+    char processedBy[10];
+};
+//global data i dont know even figure it out
+//it system config thats never ending
+
+Account customers[MAX_CUSTOMERS];
+Teller tellers[MAX_TELLERS];
+Transaction transactions[MAX_TRANSACTIONS];
+Branch branches[MAX_BRANCHES];
+//life is dangerously getting close to killing this code! - delete later
+// its just the count that relates to the branches
+int customerCount = 0;
+int tellerCount = 0;
+int transactionCount = 0;
+int branchCount = 0;
+
+// The code for managing branches will be added later
+// further account logins within config
+
+Teller currentTeller;
+Account currentCustomer;
+bool tellerLoggedIn = false; 
+bool customerLoggedIn = false;
+
+// now onto utility functions
+// normal code now! 
+// encryption now using a for loop to iterate
+void encrypt(char* text, int len) {
+    for (int i = 0; i < len; i++)
+        if (text[i] != '\0') text[i] ^= EKEY;
+}
+
+string getCurrentDateTime() {
+    time_t now = time(0);
+    char buf[25];
+    strftime(buf, sizeof(buf), "%d/%m/%Y %H:%M:%S", localtime(&now));
+    return string(buf);
+}
+
+string getTodayDate() {
+    time_t now = time(0);
+    char buf[11];
+    strftime(buf, sizeof(buf), "%d/%m/%Y", localtime(&now));
+    return string(buf);
+}
+
+string generateAccountNumber(const char* branchCode) {
+    int count = 0;
+    for (int i = 0; i < customerCount; i++)
+        if (strcmp(customers[i].branchCode, branchCode) == 0) count++;
+    count++;
+    stringstream ss;
+    ss << "ACC-" << branchCode << "-" << setfill('0') << setw(5) << count;
+    return ss.str();
+}
+
+string generateTxnID() {
+    stringstream ss;
+    ss << "TXN" << setfill('0') << setw(6) << (transactionCount + 1);
+    return ss.str();
+}
+
+int generatePIN() {
+    return rand() % 90000 + 10000; // 10000-99999
+}
+
+double getMinDeposit(int type) {
+    switch (type) {
+        case SAVINGS: return 500.0;
+        case CHEQUE:  return 1000.0;
+        case FIXED:   return 10000.0;
+        case STUDENT: return 50.0;
+        default:      return 0.0;
+    }
+}
+
+double getInterestRate(int type) {
+    switch (type) {
+        case SAVINGS: return 0.0525;
+        case CHEQUE:  return 0.015;
+        case FIXED:   return 0.08;
+        case STUDENT: return 0.03;
+        default:      return 0.0;
+    }
+}
+
+string getTypeName(int type) {
+    switch (type) {
+        case SAVINGS: return "Savings";
+        case CHEQUE:  return "Cheque";
+        case FIXED:   return "Fixed Deposit";
+        case STUDENT: return "Student";
+        default:      return "Unknown";
+    }
+}
+
+string getTxnTypeName(int type) {
+    switch (type) {
+        case DEPOSIT:    return "Deposit";
+        case WITHDRAWAL: return "Withdrawal";
+        case TRANSFER:   return "Transfer";
+        default:         return "Unknown";
+    }
+}
+
+bool validateID(const char* id) {
+    if (strlen(id) != 13) return false;
+    for (int i = 0; i < 13; i++)
+        if (!isdigit(id[i])) return false;
+    return true;
+}
+
+bool validateContact(const char* c) {
+    if (strlen(c) != 10) return false;
+    if (c[0] != '0') return false;
+    for (int i = 0; i < 10; i++)
+        if (!isdigit(c[i])) return false;
+    return true;
+}
+
+bool validateEmail(const char* email) {
+    const char* at = strchr(email, '@');
+    if (!at) return false;
+    const char* dot = strchr(at, '.');
+    return dot != nullptr;
+}
+
+bool validatePIN(const char* pin) {
+    if (strlen(pin) != 5) return false;
+    for (int i = 0; i < 5; i++)
+        if (!isdigit(pin[i])) return false;
+    return true;
+}
+
+void printLine(char c = '=', int width = 55) {
+    for (int i = 0; i < width; i++) cout << c;
+    cout << endl;
+}
+
+void printHeader(const string& title) {
+    printLine();
+    int padding = (55 - title.length()) / 2;
+    cout << setw(padding + title.length()) << title << endl;
+    printLine();
+}
+//the file I/O operations for bank tellers
+
+bool fileExists(const char* filename) {
+    ifstream f(filename, ios::binary);
+    return f.good();
+}
+
+void loadBranches() {
+    ifstream f("branches.dat", ios::binary);
+    if (!f) return;
+    while (f.read(reinterpret_cast<char*>(&branches[branchCount]), sizeof(Branch)))
+        branchCount++;
+}
+
+// the bottom will be added later
 class Bank_Tellers{
     int Teller_ID;
     string full_name;
