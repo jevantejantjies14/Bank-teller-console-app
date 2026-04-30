@@ -1,0 +1,1101 @@
+#include <iostream>
+#include <fstream>
+#include <cstring>
+#include <cstdlib>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+using namespace std;
+
+// database structure code
+// for the system use set up constants
+const int MAX_CUSTOMERS    = 500;
+const int MAX_TELLERS      = 50;
+const int MAX_TRANSACTIONS = 2000;
+const int MAX_BRANCHES     = 10;
+const char EKEY            = 'K'; // encryption key stays the same
+
+// all the account types that will interact
+const int SAVINGS  = 0;
+const int CHEQUE   = 1;
+const int FIXED    = 2;
+const int STUDENT  = 3;
+
+// Athe transactions within the system
+const int DEPOSIT     = 0;
+const int WITHDRAWAL  = 1;
+const int TRANSFER    = 2;
+
+//STRUCT BRANCHES and other details for question
+struct Branch {
+    char code[10];
+    char name[50];
+    char address[100];
+    char manager[50];
+};
+
+struct Teller {
+    char id[10];
+    char full_name[50];    // changed from fullName to full_name
+    char pass[50];         // changed from password to pass
+    char brCode[10];       // changed from branchCode to brCode
+};
+
+// accounts - picking up from last left off
+struct Account {
+    char accNum[25];       // changed from accountNumber to accNum
+    char fname[30];        // changed from firstName to fname
+    char sname[30];        // changed from surname to sname
+    char saID[14];         // changed from idNumber to saID
+    char cell[12];         // changed from contact to cell
+    char email[50];
+    char addr[100];        // changed from address to addr
+    char dob[12];
+    int  accType;          // changed from type to accType
+    double balance;
+    char brCode[10];       // changed from branchCode to brCode
+    char pin[10];          // encrypted
+    bool locked;
+    int  failCount;        // changed from failedAttempts to failCount
+};
+
+struct Transaction {
+    char txnID[15];
+    char accNum[25];       // changed from accountNumber to accNum
+    int  transType;        // changed from type to transType
+    double amount;
+    double balBefore;      // changed from balanceBefore
+    double balAfter;       // changed from balanceAfter
+    char dt[25];           // changed from dateTime
+    char targetAcc[25];    // changed from targetAccount
+    char brCode[10];       // changed from branchCode
+    char processedBy[10];
+};
+
+// global data i dont know even figure it out
+// it system config thats never ending
+Account     customers[MAX_CUSTOMERS];
+Teller      tellers[MAX_TELLERS];
+Transaction transactions[MAX_TRANSACTIONS];
+Branch      branches[MAX_BRANCHES];
+
+// its just the count that relates to the branches
+int customerCount    = 0;
+int tellerCount      = 0;
+int transactionCount = 0;
+int branchCount      = 0;
+
+// The code for managing branches will be added later
+// further account logins within config
+Teller  currentTeller;
+Account currentCustomer;
+bool    tellerLoggedIn   = false;
+bool    customerLoggedIn = false;
+
+// now onto utility functions
+// normal code now!
+// encryption now using a for loop to iterate
+void encrypt(char* text, int len) {
+    for (int i = 0; i < len; i++)
+        if (text[i] != '\0') text[i] ^= EKEY;
+}
+
+// get date and time when needed
+string getCurrentDateTime() {
+    time_t now = time(0);
+    char buf[25];
+    strftime(buf, sizeof(buf), "%d/%m/%Y %H:%M:%S", localtime(&now));
+    return string(buf);
+}
+
+string getTodayDate() {
+    time_t now = time(0);
+    char buf[11];
+    strftime(buf, sizeof(buf), "%d/%m/%Y", localtime(&now));
+    return string(buf);
+}
+
+// generate an account number based on branch and count
+string generateAccountNumber(const char* branchCode) {
+    int count = 0;
+    for (int i = 0; i < customerCount; i++)
+        if (strcmp(customers[i].brCode, branchCode) == 0) count++;
+    count++;
+    stringstream ss;
+    ss << "ACC-" << branchCode << "-" << setfill('0') << setw(5) << count;
+    return ss.str();
+}
+
+// transaction id just goes up by 1 each time
+string generateTxnID() {
+    stringstream ss;
+    ss << "TXN" << setfill('0') << setw(6) << (transactionCount + 1);
+    return ss.str();
+}
+
+// random pin from 10000 to 99999
+int generatePIN() {
+    return rand() % 90000 + 10000;
+}
+
+// minimum deposit depends on account type
+double getMinDeposit(int type) {
+    switch (type) {
+        case SAVINGS: return 500.0;
+        case CHEQUE:  return 1000.0;
+        case FIXED:   return 10000.0;
+        case STUDENT: return 50.0;
+        default:      return 0.0;
+    }
+}
+
+double getInterestRate(int type) {
+    switch (type) {
+        case SAVINGS: return 0.0525;
+        case CHEQUE:  return 0.015;
+        case FIXED:   return 0.08;
+        case STUDENT: return 0.03;
+        default:      return 0.0;
+    }
+}
+
+string getTypeName(int type) {
+    switch (type) {
+        case SAVINGS: return "Savings";
+        case CHEQUE:  return "Cheque";
+        case FIXED:   return "Fixed Deposit";
+        case STUDENT: return "Student";
+        default:      return "Unknown";
+    }
+}
+
+string getTxnTypeName(int type) {
+    switch (type) {
+        case DEPOSIT:    return "Deposit";
+        case WITHDRAWAL: return "Withdrawal";
+        case TRANSFER:   return "Transfer";
+        default:         return "Unknown";
+    }
+}
+
+// validation functions just check length and digits
+bool validateID(const char* id) {
+    if (strlen(id) != 13) return false;
+    for (int i = 0; i < 13; i++)
+        if (!isdigit(id[i])) return false;
+    return true;
+}
+
+bool validateContact(const char* c) {
+    if (strlen(c) != 10) return false;
+    if (c[0] != '0') return false;
+    for (int i = 0; i < 10; i++)
+        if (!isdigit(c[i])) return false;
+    return true;
+}
+
+bool validateEmail(const char* email) {
+    const char* at = strchr(email, '@');
+    if (!at) return false;
+    const char* dot = strchr(at, '.');
+    return dot != nullptr;
+}
+
+bool validatePIN(const char* pin) {
+    if (strlen(pin) != 5) return false;
+    for (int i = 0; i < 5; i++)
+        if (!isdigit(pin[i])) return false;
+    return true;
+}
+
+void printLine(char c = '=', int width = 55) {
+    for (int i = 0; i < width; i++) cout << c;
+    cout << endl;
+}
+
+void printHeader(const string& title) {
+    printLine();
+    int padding = (55 - title.length()) / 2;
+    cout << setw(padding + title.length()) << title << endl;
+    printLine();
+}
+
+//the file I/O operations for bank tellers
+bool fileExists(const char* filename) {
+    ifstream f(filename, ios::binary);
+    return f.good();
+}
+
+void loadBranches() {
+    ifstream f("branches.dat", ios::binary);
+    if (!f) return;
+    while (f.read(reinterpret_cast<char*>(&branches[branchCount]), sizeof(Branch)))
+        branchCount++;
+    f.close();
+}
+
+void saveBranch(Branch& b) {
+    ofstream f("branches.dat", ios::binary | ios::app);
+    f.write(reinterpret_cast<char*>(&b), sizeof(Branch));
+    f.close();
+}
+
+void saveAllBranches() {
+    ofstream f("branches.dat", ios::binary | ios::trunc);
+    for (int i = 0; i < branchCount; i++)
+        f.write(reinterpret_cast<char*>(&branches[i]), sizeof(Branch));
+    f.close();
+}
+
+void loadTellers() {
+    ifstream f("tellers.dat", ios::binary);
+    if (!f) return;
+    while (f.read(reinterpret_cast<char*>(&tellers[tellerCount]), sizeof(Teller)))
+        tellerCount++;
+    f.close();
+}
+
+void saveTeller(Teller& t) {
+    ofstream f("tellers.dat", ios::binary | ios::app);
+    f.write(reinterpret_cast<char*>(&t), sizeof(Teller));
+    f.close();
+}
+
+void loadCustomers() {
+    ifstream f("customers.dat", ios::binary);
+    if (!f) return;
+    while (f.read(reinterpret_cast<char*>(&customers[customerCount]), sizeof(Account)))
+        customerCount++;
+    f.close();
+}
+
+void saveCustomer(Account& a) {
+    ofstream f("customers.dat", ios::binary | ios::app);
+    f.write(reinterpret_cast<char*>(&a), sizeof(Account));
+    f.close();
+}
+
+void saveAllCustomers() {
+    ofstream f("customers.dat", ios::binary | ios::trunc);
+    for (int i = 0; i < customerCount; i++)
+        f.write(reinterpret_cast<char*>(&customers[i]), sizeof(Account));
+    f.close();
+}
+
+void loadTransactions() {
+    ifstream f("transactions.dat", ios::binary);
+    if (!f) return;
+    while (f.read(reinterpret_cast<char*>(&transactions[transactionCount]), sizeof(Transaction)))
+        transactionCount++;
+    f.close();
+}
+
+void saveTransaction(Transaction& t) {
+    ofstream f("transactions.dat", ios::binary | ios::app);
+    f.write(reinterpret_cast<char*>(&t), sizeof(Transaction));
+    f.close();
+    transactions[transactionCount++] = t;
+}
+
+void loadAllData() {
+    loadBranches();
+    loadTellers();
+    loadCustomers();
+    loadTransactions();
+}
+
+// sets up default data if files don't exist yet
+void initDefaultData() {
+    if (!fileExists("branches.dat")) {
+        Branch b1; strcpy(b1.code, "JHB"); strcpy(b1.name, "Johannesburg Main");
+        strcpy(b1.address, "123 Main St, JHB"); strcpy(b1.manager, "Mike Dlamini");
+        branches[branchCount++] = b1; saveBranch(b1);
+
+        Branch b2; strcpy(b2.code, "CPT"); strcpy(b2.name, "Cape Town Central");
+        strcpy(b2.address, "456 Long St, CPT"); strcpy(b2.manager, "Lisa Botha");
+        branches[branchCount++] = b2; saveBranch(b2);
+
+        Branch b3; strcpy(b3.code, "DBN"); strcpy(b3.name, "Durban North");
+        strcpy(b3.address, "789 Beach Rd, DBN"); strcpy(b3.manager, "Raj Naidoo");
+        branches[branchCount++] = b3; saveBranch(b3);
+    }
+
+    if (!fileExists("tellers.dat")) {
+        Teller t1; strcpy(t1.id, "T001"); strcpy(t1.full_name, "John Smith");
+        strcpy(t1.pass, "admin123"); strcpy(t1.brCode, "JHB");
+        encrypt(t1.pass, strlen(t1.pass));
+        tellers[tellerCount++] = t1; saveTeller(t1);
+
+        Teller t2; strcpy(t2.id, "T002"); strcpy(t2.full_name, "Sarah Jones");
+        strcpy(t2.pass, "teller456"); strcpy(t2.brCode, "CPT");
+        encrypt(t2.pass, strlen(t2.pass));
+        tellers[tellerCount++] = t2; saveTeller(t2);
+
+        Teller t3; strcpy(t3.id, "T003"); strcpy(t3.full_name, "Thabo Mokoena");
+        strcpy(t3.pass, "pass789"); strcpy(t3.brCode, "DBN");
+        encrypt(t3.pass, strlen(t3.pass));
+        tellers[tellerCount++] = t3; saveTeller(t3);
+    }
+
+    if (!fileExists("system_config.txt")) {
+        ofstream cfg("system_config.txt");
+        cfg << "MAX_LOGIN_ATTEMPTS=3\n";
+        cfg << "ENCRYPTION_KEY=K\n";
+        cfg << "SYSTEM_NAME=Standard Bank Management System\n";
+        cfg << "VERSION=1.0\n";
+        cfg.close();
+    }
+}
+
+// copys the data files to backup versions
+void backupData() {
+    auto copyFile = [](const char* src, const char* dst) {
+        ifstream in(src, ios::binary);
+        ofstream out(dst, ios::binary);
+        if (in && out) out << in.rdbuf();
+    };
+    copyFile("customers.dat",    "customers_backup.dat");
+    copyFile("tellers.dat",      "tellers_backup.dat");
+    copyFile("transactions.dat", "transactions_backup.dat");
+    copyFile("branches.dat",     "branches_backup.dat");
+    cout << "Backup completed successfully." << endl;
+}
+
+void exportToCSV() {
+    ofstream f("report_export.csv");
+    f << "AccountNumber,FirstName,Surname,Type,Balance,Branch,Locked\n";
+    for (int i = 0; i < customerCount; i++) {
+        f << customers[i].accNum << ","
+          << customers[i].fname << ","
+          << customers[i].sname << ","
+          << getTypeName(customers[i].accType) << ","
+          << fixed << setprecision(2) << customers[i].balance << ","
+          << customers[i].brCode << ","
+          << (customers[i].locked ? "Yes" : "No") << "\n";
+    }
+    f.close();
+    cout << "Exported to report_export.csv" << endl;
+}
+
+//authentication
+bool tellerLogin() {
+    printHeader("TELLER LOGIN");
+    char id[10], pass[50];
+    cout << "Teller ID   : "; cin >> id;
+    cout << "Password    : "; cin >> pass;
+
+    char encPass[50];
+    strcpy(encPass, pass);
+    encrypt(encPass, strlen(encPass));
+
+    for (int i = 0; i < tellerCount; i++) {
+        if (strcmp(tellers[i].id, id) == 0 &&
+            strcmp(tellers[i].pass, encPass) == 0) {
+            currentTeller = tellers[i];
+            tellerLoggedIn = true;
+            cout << "\nWelcome, " << currentTeller.full_name
+                 << " [Branch: " << currentTeller.brCode << "]" << endl;
+            return true;
+        }
+    }
+    cout << "Invalid Teller ID or Password." << endl;
+    return false;
+}
+
+bool customerLogin() {
+    printHeader("CUSTOMER LOGIN");
+    char accNum[25];
+    cout << "Account Number : "; cin >> accNum;
+
+    int idx = -1;
+    for (int i = 0; i < customerCount; i++) {
+        if (strcmp(customers[i].accNum, accNum) == 0) {
+            idx = i; break;
+        }
+    }
+
+    if (idx == -1) { cout << "Account not found." << endl; return false; }
+
+    if (customers[idx].locked) {
+        cout << "Account is locked. Please visit your branch." << endl;
+        return false;
+    }
+
+    int attempts = 0;
+    while (attempts < 3) {
+        char pin[10];
+        cout << "PIN : "; cin >> pin;
+
+        char encPin[10];
+        strcpy(encPin, pin);
+        encrypt(encPin, strlen(encPin));
+
+        if (strcmp(customers[idx].pin, encPin) == 0) {
+            customers[idx].failCount = 0;
+            saveAllCustomers();
+            currentCustomer = customers[idx];
+            customerLoggedIn = true;
+            cout << "\nWelcome, " << currentCustomer.fname << "!" << endl;
+            return true;
+        }
+
+        attempts++;
+        customers[idx].failCount++;
+        if (customers[idx].failCount >= 3) {
+            customers[idx].locked = true;
+            saveAllCustomers();
+            cout << "Too many failed attempts. Account locked." << endl;
+            return false;
+        }
+        cout << "Wrong PIN. " << (3 - attempts) << " attempt(s) remaining." << endl;
+    }
+    return false;
+}
+
+// ACCOUNT MANAGEMENT
+void registerCustomer() {
+    if (!tellerLoggedIn) { cout << "Access denied." << endl; return; }
+    printHeader("REGISTER NEW CUSTOMER");
+
+    Account a;
+    memset(&a, 0, sizeof(Account));
+
+    cout << "First Name   : "; cin >> a.fname;
+    cout << "Surname      : "; cin >> a.sname;
+
+    do {
+        cout << "SA ID Number (13 digits): "; cin >> a.saID;
+        if (!validateID(a.saID)) cout << "Invalid ID. Must be 13 digits." << endl;
+    } while (!validateID(a.saID));
+
+    do {
+        cout << "Contact Number (10 digits): "; cin >> a.cell;
+        if (!validateContact(a.cell)) cout << "Invalid. Must be 10 digits starting with 0." << endl;
+    } while (!validateContact(a.cell));
+
+    do {
+        cout << "Email Address: "; cin >> a.email;
+        if (!validateEmail(a.email)) cout << "Invalid email format." << endl;
+    } while (!validateEmail(a.email));
+
+    cin.ignore();
+    cout << "Physical Address: "; cin.getline(a.addr, 100);
+
+    cout << "Date of Birth (DD/MM/YYYY): "; cin >> a.dob;
+
+    cout << "\nAccount Type:\n";
+    cout << "1. Savings (min R500)\n";
+    cout << "2. Cheque (min R1000)\n";
+    cout << "3. Fixed Deposit (min R10000)\n";
+    cout << "4. Student (min R50)\n";
+    cout << "Choice: "; int tc; cin >> tc;
+    a.accType = tc - 1;
+
+    double minDep = getMinDeposit(a.accType);
+    do {
+        cout << "Initial Deposit (min R" << fixed << setprecision(2) << minDep << "): ";
+        cin >> a.balance;
+        if (a.balance < minDep)
+            cout << "Amount too low. Minimum is R" << minDep << endl;
+    } while (a.balance < minDep);
+
+    string accNum = generateAccountNumber(currentTeller.brCode);
+    strcpy(a.accNum, accNum.c_str());
+    strcpy(a.brCode, currentTeller.brCode);
+
+    int pinInt = generatePIN();
+    char pinStr[10];
+    sprintf(pinStr, "%d", pinInt);
+    char encPin[10];
+    strcpy(encPin, pinStr);
+    encrypt(encPin, strlen(encPin));
+    strcpy(a.pin, encPin);
+
+    a.locked = false;
+    a.failCount = 0;
+
+    customers[customerCount++] = a;
+    saveCustomer(a);
+
+    Transaction t;
+    memset(&t, 0, sizeof(Transaction));
+    string txnID = generateTxnID();
+    strcpy(t.txnID, txnID.c_str());
+    strcpy(t.accNum, a.accNum);
+    t.transType = DEPOSIT;
+    t.amount = a.balance;
+    t.balBefore = 0;
+    t.balAfter = a.balance;
+    string dt = getCurrentDateTime();
+    strcpy(t.dt, dt.c_str());
+    strcpy(t.brCode, a.brCode);
+    strcpy(t.processedBy, currentTeller.id);
+    saveTransaction(t);
+
+    cout << "\n--- ACCOUNT CREATED SUCCESSFULLY ---" << endl;
+    cout << "Account Number : " << a.accNum << endl;
+    cout << "Customer PIN   : " << pinStr << " (Show to customer once only!)" << endl;
+    printLine();
+}
+
+void viewCustomerDetails() {
+    printHeader("VIEW CUSTOMER DETAILS");
+    char accNum[25];
+    cout << "Enter Account Number: "; cin >> accNum;
+
+    for (int i = 0; i < customerCount; i++) {
+        if (strcmp(customers[i].accNum, accNum) == 0) {
+            printLine('-');
+            cout << "Account Number : " << customers[i].accNum << endl;
+            cout << "Name           : " << customers[i].fname << " " << customers[i].sname << endl;
+            cout << "ID Number      : " << customers[i].saID << endl;
+            cout << "Contact        : " << customers[i].cell << endl;
+            cout << "Email          : " << customers[i].email << endl;
+            cout << "Address        : " << customers[i].addr << endl;
+            cout << "Date of Birth  : " << customers[i].dob << endl;
+            cout << "Account Type   : " << getTypeName(customers[i].accType) << endl;
+            cout << "Balance        : R" << fixed << setprecision(2) << customers[i].balance << endl;
+            cout << "Branch         : " << customers[i].brCode << endl;
+            cout << "Status         : " << (customers[i].locked ? "LOCKED" : "Active") << endl;
+            printLine('-');
+            return;
+        }
+    }
+    cout << "Customer not found." << endl;
+}
+
+void searchCustomer() {
+    printHeader("SEARCH CUSTOMER");
+    cout << "1. Search by Account Number\n";
+    cout << "2. Search by Name\n";
+    cout << "3. Search by ID Number\n";
+    cout << "4. Search by Branch\n";
+    cout << "Choice: "; int ch; cin >> ch;
+
+    char term[50];
+    bool found = false;
+
+    if (ch == 1) {
+        cout << "Account Number: "; cin >> term;
+        for (int i = 0; i < customerCount; i++)
+            if (strcmp(customers[i].accNum, term) == 0) {
+                cout << customers[i].accNum << " | "
+                     << customers[i].fname << " " << customers[i].sname
+                     << " | R" << fixed << setprecision(2) << customers[i].balance << endl;
+                found = true;
+            }
+    } else if (ch == 2) {
+        cout << "Name (partial): "; cin >> term;
+        for (int i = 0; i < customerCount; i++) {
+            char fullName[61];
+            strcpy(fullName, customers[i].fname);
+            strcat(fullName, " ");
+            strcat(fullName, customers[i].sname);
+            if (strstr(fullName, term)) {
+                cout << customers[i].accNum << " | "
+                     << fullName << " | " << getTypeName(customers[i].accType) << endl;
+                found = true;
+            }
+        }
+    } else if (ch == 3) {
+        cout << "ID Number: "; cin >> term;
+        for (int i = 0; i < customerCount; i++)
+            if (strcmp(customers[i].saID, term) == 0) {
+                cout << customers[i].accNum << " | "
+                     << customers[i].fname << " " << customers[i].sname << endl;
+                found = true;
+            }
+    } else if (ch == 4) {
+        cout << "Branch Code: "; cin >> term;
+        for (int i = 0; i < customerCount; i++)
+            if (strcmp(customers[i].brCode, term) == 0) {
+                cout << customers[i].accNum << " | "
+                     << customers[i].fname << " " << customers[i].sname
+                     << " | R" << fixed << setprecision(2) << customers[i].balance << endl;
+                found = true;
+            }
+    }
+
+    if (!found) cout << "No results found." << endl;
+}
+
+// TRANSACTION STUFF
+bool verifyPINForAccount(int idx) {
+    char pin[10];
+    cout << "Enter PIN: "; cin >> pin;
+    char encPin[10];
+    strcpy(encPin, pin);
+    encrypt(encPin, strlen(encPin));
+    return strcmp(customers[idx].pin, encPin) == 0;
+}
+
+void recordTransaction(int idx, int type, double amount, const char* target = "") {
+    Transaction t;
+    memset(&t, 0, sizeof(Transaction));
+    string txnID = generateTxnID();
+    strcpy(t.txnID, txnID.c_str());
+    strcpy(t.accNum, customers[idx].accNum);
+    t.transType = type;
+    t.amount = amount;
+    t.balBefore = customers[idx].balance - (type == DEPOSIT ? amount : -amount);
+    t.balAfter = customers[idx].balance;
+    string dt = getCurrentDateTime();
+    strcpy(t.dt, dt.c_str());
+    strcpy(t.brCode, customers[idx].brCode);
+    strcpy(t.targetAcc, target);
+    if (tellerLoggedIn)
+        strcpy(t.processedBy, currentTeller.id);
+    else
+        strcpy(t.processedBy, "SELF");
+    saveTransaction(t);
+}
+
+void processDeposit(int idx) {
+    try {
+        printHeader("CASH DEPOSIT");
+        double amount;
+        cout << "Deposit Amount: R"; cin >> amount;
+        if (amount <= 0) throw runtime_error("Amount must be greater than zero.");
+
+        customers[idx].balance += amount;
+        saveAllCustomers();
+        recordTransaction(idx, DEPOSIT, amount);
+
+        cout << "\nDeposit Successful!" << endl;
+        cout << "Amount Deposited : R" << fixed << setprecision(2) << amount << endl;
+        cout << "New Balance      : R" << fixed << setprecision(2) << customers[idx].balance << endl;
+
+    } catch (runtime_error& e) {
+        cout << "Error: " << e.what() << endl;
+    }
+}
+
+void processWithdrawal(int idx) {
+    try {
+        if (customers[idx].accType == FIXED)
+            throw runtime_error("Withdrawals not allowed on Fixed Deposit accounts.");
+
+        printHeader("CASH WITHDRAWAL");
+        double amount;
+        cout << "Withdrawal Amount: R"; cin >> amount;
+        if (amount <= 0) throw runtime_error("Amount must be greater than zero.");
+
+        double overdraft = (customers[idx].accType == CHEQUE) ? 500.0 : 0.0;
+        if (amount > customers[idx].balance + overdraft)
+            throw runtime_error("Insufficient funds.");
+
+        customers[idx].balance -= amount;
+        saveAllCustomers();
+        recordTransaction(idx, WITHDRAWAL, amount);
+
+        cout << "\nWithdrawal Successful!" << endl;
+        cout << "Amount Withdrawn : R" << fixed << setprecision(2) << amount << endl;
+        cout << "New Balance      : R" << fixed << setprecision(2) << customers[idx].balance << endl;
+
+    } catch (runtime_error& e) {
+        cout << "Error: " << e.what() << endl;
+    }
+}
+
+void processTransfer(int idx) {
+    try {
+        printHeader("FUND TRANSFER");
+        char targetAcc[25];
+        cout << "Target Account Number: "; cin >> targetAcc;
+
+        int targetIdx = -1;
+        for (int i = 0; i < customerCount; i++)
+            if (strcmp(customers[i].accNum, targetAcc) == 0) { targetIdx = i; break; }
+
+        if (targetIdx == -1) throw runtime_error("Target account not found.");
+        if (targetIdx == idx) throw runtime_error("Cannot transfer to the same account.");
+
+        double amount;
+        cout << "Transfer Amount: R"; cin >> amount;
+        if (amount <= 0) throw runtime_error("Amount must be greater than zero.");
+        if (amount > customers[idx].balance) throw runtime_error("Insufficient funds.");
+
+        customers[idx].balance -= amount;
+        customers[targetIdx].balance += amount;
+        saveAllCustomers();
+
+        recordTransaction(idx, TRANSFER, amount, targetAcc);
+
+        Transaction t;
+        memset(&t, 0, sizeof(Transaction));
+        string txnID = generateTxnID();
+        strcpy(t.txnID, txnID.c_str());
+        strcpy(t.accNum, customers[targetIdx].accNum);
+        t.transType = DEPOSIT;
+        t.amount = amount;
+        t.balBefore = customers[targetIdx].balance - amount;
+        t.balAfter = customers[targetIdx].balance;
+        string dt = getCurrentDateTime();
+        strcpy(t.dt, dt.c_str());
+        strcpy(t.brCode, customers[targetIdx].brCode);
+        strcpy(t.targetAcc, customers[idx].accNum);
+        strcpy(t.processedBy, tellerLoggedIn ? currentTeller.id : "SELF");
+        saveTransaction(t);
+
+        cout << "\nTransfer Successful!" << endl;
+        cout << "Transferred      : R" << fixed << setprecision(2) << amount << endl;
+        cout << "To Account       : " << targetAcc << endl;
+        cout << "Your New Balance : R" << fixed << setprecision(2) << customers[idx].balance << endl;
+
+    } catch (runtime_error& e) {
+        cout << "Error: " << e.what() << endl;
+    }
+}
+
+void viewStatement(const char* accNum) {
+    printHeader("ACCOUNT STATEMENT");
+    cout << "Account: " << accNum << endl;
+    printLine('-');
+    cout << left << setw(12) << "TXN ID"
+         << setw(22) << "Date & Time"
+         << setw(12) << "Type"
+         << setw(12) << "Amount"
+         << setw(12) << "Balance" << endl;
+    printLine('-');
+
+    bool found = false;
+    for (int i = 0; i < transactionCount; i++) {
+        if (strcmp(transactions[i].accNum, accNum) == 0) {
+            cout << left << setw(12) << transactions[i].txnID
+                 << setw(22) << transactions[i].dt
+                 << setw(12) << getTxnTypeName(transactions[i].transType)
+                 << "R" << setw(11) << fixed << setprecision(2) << transactions[i].amount
+                 << "R" << setw(11) << fixed << setprecision(2) << transactions[i].balAfter << endl;
+            found = true;
+        }
+    }
+
+    if (!found) cout << "No transactions found for this account." << endl;
+    printLine('-');
+}
+
+void changePIN(int idx) {
+    printHeader("CHANGE PIN");
+    cout << "Enter current PIN: ";
+    char oldPin[10]; cin >> oldPin;
+    char encOld[10]; strcpy(encOld, oldPin); encrypt(encOld, strlen(encOld));
+
+    if (strcmp(customers[idx].pin, encOld) != 0) {
+        cout << "Incorrect current PIN." << endl; return;
+    }
+
+    char newPin[10], confirmPin[10];
+    cout << "Enter new PIN (5 digits): "; cin >> newPin;
+    if (!validatePIN(newPin)) { cout << "Invalid PIN format." << endl; return; }
+
+    cout << "Confirm new PIN: "; cin >> confirmPin;
+    if (strcmp(newPin, confirmPin) != 0) { cout << "PINs do not match." << endl; return; }
+
+    char encNew[10]; strcpy(encNew, newPin); encrypt(encNew, strlen(encNew));
+    strcpy(customers[idx].pin, encNew);
+    strcpy(currentCustomer.pin, encNew);
+    saveAllCustomers();
+    cout << "PIN changed successfully!" << endl;
+}
+
+// BRANCH FUNCTIONS
+void viewAllBranches() {
+    printHeader("ALL BRANCHES");
+    cout << left << setw(10) << "Code"
+         << setw(25) << "Name"
+         << setw(20) << "Manager"
+         << "Address" << endl;
+    printLine('-');
+    for (int i = 0; i < branchCount; i++) {
+        cout << left << setw(10) << branches[i].code
+             << setw(25) << branches[i].name
+             << setw(20) << branches[i].manager
+             << branches[i].address << endl;
+    }
+}
+
+void viewBranchDetails(const char* code) {
+    printHeader("BRANCH DETAILS");
+    for (int i = 0; i < branchCount; i++) {
+        if (strcmp(branches[i].code, code) == 0) {
+            cout << "Code    : " << branches[i].code << endl;
+            cout << "Name    : " << branches[i].name << endl;
+            cout << "Manager : " << branches[i].manager << endl;
+            cout << "Address : " << branches[i].address << endl;
+
+            int custCount = 0; double totalBal = 0;
+            for (int j = 0; j < customerCount; j++)
+                if (strcmp(customers[j].brCode, code) == 0) {
+                    custCount++; totalBal += customers[j].balance;
+                }
+            cout << "Customers     : " << custCount << endl;
+            cout << "Total Balance : R" << fixed << setprecision(2) << totalBal << endl;
+            return;
+        }
+    }
+    cout << "Branch not found." << endl;
+}
+
+void compareBranches() {
+    printHeader("BRANCH COMPARISON");
+    cout << left << setw(8) << "Code"
+         << setw(22) << "Name"
+         << setw(12) << "Customers"
+         << setw(18) << "Total Balance"
+         << "Transactions" << endl;
+    printLine('-');
+
+    for (int i = 0; i < branchCount; i++) {
+        int cust = 0, txns = 0; double total = 0;
+        for (int j = 0; j < customerCount; j++)
+            if (strcmp(customers[j].brCode, branches[i].code) == 0) {
+                cust++; total += customers[j].balance;
+            }
+        for (int j = 0; j < transactionCount; j++)
+            if (strcmp(transactions[j].brCode, branches[i].code) == 0) txns++;
+
+        cout << left << setw(8) << branches[i].code
+             << setw(22) << branches[i].name
+             << setw(12) << cust
+             << "R" << setw(17) << fixed << setprecision(2) << total
+             << txns << endl;
+    }
+}
+
+// REPORT FUNCTIONS
+void dailyTransactionReport() {
+    printHeader("DAILY TRANSACTION REPORT");
+    string today = getTodayDate();
+    cout << "Date: " << today << endl;
+    printLine('-');
+    cout << left << setw(12) << "TXN ID"
+         << setw(25) << "Account"
+         << setw(12) << "Type"
+         << "Amount" << endl;
+    printLine('-');
+
+    double totalDep = 0, totalWith = 0;
+    bool found = false;
+    for (int i = 0; i < transactionCount; i++) {
+        if (strncmp(transactions[i].dt, today.c_str(), 10) == 0) {
+            cout << left << setw(12) << transactions[i].txnID
+                 << setw(25) << transactions[i].accNum
+                 << setw(12) << getTxnTypeName(transactions[i].transType)
+                 << "R" << fixed << setprecision(2) << transactions[i].amount << endl;
+            if (transactions[i].transType == DEPOSIT)    totalDep  += transactions[i].amount;
+            if (transactions[i].transType == WITHDRAWAL) totalWith += transactions[i].amount;
+            found = true;
+        }
+    }
+    if (!found) cout << "No transactions today." << endl;
+    printLine('-');
+    cout << "Total Deposits    : R" << fixed << setprecision(2) << totalDep << endl;
+    cout << "Total Withdrawals : R" << fixed << setprecision(2) << totalWith << endl;
+    cout << "Net               : R" << fixed << setprecision(2) << (totalDep - totalWith) << endl;
+}
+
+void customerAccountSummary() {
+    printHeader("CUSTOMER ACCOUNT SUMMARY");
+    cout << left << setw(20) << "Account"
+         << setw(25) << "Name"
+         << setw(15) << "Type"
+         << setw(14) << "Balance"
+         << "Branch" << endl;
+    printLine('-');
+
+    double grandTotal = 0; int count = 0;
+    for (int i = 0; i < customerCount; i++) {
+        if (tellerLoggedIn && strcmp(customers[i].brCode, currentTeller.brCode) != 0)
+            continue;
+        cout << left << setw(20) << customers[i].accNum
+             << setw(25) << (string(customers[i].fname) + " " + customers[i].sname)
+             << setw(15) << getTypeName(customers[i].accType)
+             << "R" << setw(13) << fixed << setprecision(2) << customers[i].balance
+             << customers[i].brCode << endl;
+        grandTotal += customers[i].balance;
+        count++;
+    }
+    printLine('-');
+    cout << "Total Customers : " << count << endl;
+    cout << "Total Balance   : R" << fixed << setprecision(2) << grandTotal << endl;
+}
+
+void branchPerformanceReport() {
+    printHeader("BRANCH PERFORMANCE REPORT");
+    compareBranches();
+}
+
+void applyInterest() {
+    if (!tellerLoggedIn) { cout << "Access denied." << endl; return; }
+    printHeader("APPLY INTEREST");
+    char confirm;
+    cout << "Apply interest to all eligible accounts? (y/n): "; cin >> confirm;
+    if (confirm != 'y' && confirm != 'Y') return;
+
+    for (int i = 0; i < customerCount; i++) {
+        double rate = getInterestRate(customers[i].accType);
+        double interest = customers[i].balance * rate;
+        cout << customers[i].accNum << " | Balance: R"
+             << fixed << setprecision(2) << customers[i].balance
+             << " | Interest: R" << interest << endl;
+        customers[i].balance += interest;
+
+        Transaction t; memset(&t, 0, sizeof(Transaction));
+        string txnID = generateTxnID();
+        strcpy(t.txnID, txnID.c_str());
+        strcpy(t.accNum, customers[i].accNum);
+        t.transType = DEPOSIT; t.amount = interest;
+        t.balBefore = customers[i].balance - interest;
+        t.balAfter = customers[i].balance;
+        string dt = getCurrentDateTime(); strcpy(t.dt, dt.c_str());
+        strcpy(t.brCode, customers[i].brCode);
+        strcpy(t.processedBy, currentTeller.id);
+        saveTransaction(t);
+    }
+    saveAllCustomers();
+    cout << "Interest applied successfully." << endl;
+}
+
+// MENUS
+void reportsMenu() {
+    int ch;
+    do {
+        printHeader("REPORTS MENU");
+        cout << "1. Daily Transaction Report\n";
+        cout << "2. Customer Account Summary\n";
+        cout << "3. Branch Performance Report\n";
+        cout << "4. Export to CSV\n";
+        cout << "5. Backup Data\n";
+        cout << "0. Back\n";
+        cout << "Choice: "; cin >> ch;
+        switch (ch) {
+            case 1: dailyTransactionReport(); break;
+            case 2: customerAccountSummary(); break;
+            case 3: branchPerformanceReport(); break;
+            case 4: exportToCSV(); break;
+            case 5: backupData(); break;
+        }
+    } while (ch != 0);
+}
+
+void tellerTransactionMenu() {
+    char accNum[25];
+    cout << "Enter Customer Account Number: "; cin >> accNum;
+
+    int idx = -1;
+    for (int i = 0; i < customerCount; i++)
+        if (strcmp(customers[i].accNum, accNum) == 0) { idx = i; break; }
+
+    if (idx == -1) { cout << "Account not found." << endl; return; }
+
+    cout << "Customer: " << customers[idx].fname << " " << customers[idx].sname << endl;
+    cout << "Verify Customer PIN first." << endl;
+    if (!verifyPINForAccount(idx)) { cout << "PIN verification failed." << endl; return; }
+
+    int ch;
+    do {
+        cout << "\n1. Deposit\n2. Withdrawal\n3. Transfer\n4. View Statement\n0. Back\nChoice: ";
+        cin >> ch;
+        switch (ch) {
+            case 1: processDeposit(idx); break;
+            case 2: processWithdrawal(idx); break;
+            case 3: processTransfer(idx); break;
+            case 4: viewStatement(accNum); break;
+        }
+    } while (ch != 0);
+}
+
+void tellerMenu() {
+    int ch;
+    do {
+        printHeader(string("TELLER MENU [") + currentTeller.brCode + "]");
+        cout << "1.  Register New Customer\n";
+        cout << "2.  View Customer Details\n";
+        cout << "3.  Process Transaction\n";
+        cout << "4.  Search Customer\n";
+        cout << "5.  View All Branches\n";
+        cout << "6.  View My Branch Details\n";
+        cout << "7.  Compare Branches\n";
+        cout << "8.  Reports\n";
+        cout << "9.  Apply Interest\n";
+        cout << "0.  Logout\n";
+        cout << "Choice: "; cin >> ch;
+
+        switch (ch) {
+            case 1: registerCustomer(); break;
+            case 2: viewCustomerDetails(); break;
+            case 3: tellerTransactionMenu(); break;
+            case 4: searchCustomer(); break;
+            case 5: viewAllBranches(); break;
+            case 6: viewBranchDetails(currentTeller.brCode); break;
+            case 7: compareBranches(); break;
+            case 8: reportsMenu(); break;
+            case 9: applyInterest(); break;
+            case 0: tellerLoggedIn = false; cout << "Logged out." << endl; break;
+            default: cout << "Invalid option." << endl;
+        }
+    } while (ch != 0);
+}
+
+void customerMenu() {
+    int idx = -1;
+    for (int i = 0; i < customerCount; i++)
+        if (strcmp(customers[i].accNum, currentCustomer.accNum) == 0) { idx = i; break; }
+
+    if (idx == -1) { cout << "Error loading account." << endl; return; }
+
+    int ch;
+    do {
+        printHeader("CUSTOMER MENU");
+        cout << "Account : " << customers[idx].accNum << endl;
+        cout << "Balance : R" << fixed << setprecision(2) << customers[idx].balance << endl;
+        printLine('-');
+        cout << "1. View Balance\n";
+        cout << "2. Deposit\n";
+        cout << "3. Withdrawal\n";
+        cout << "4. Transfer Funds\n";
+        cout << "5. View Statement\n";
+        cout << "6. Change PIN\n";
+        cout << "0. Logout\n";
+        cout << "Choice: "; cin >> ch;
+
+        switch (ch) {
+            case 1:
+                cout << "Current Balance: R" << fixed << setprecision(2) << customers[idx].balance << endl;
+                break;
+            case 2: processDeposit(idx); break;
+            case 3: processWithdrawal(idx); break;
+            case 4: processTransfer(idx); break;
+            case 5: viewStatement(customers[idx].accNum); break;
+            case 6: changePIN(idx); break;
+            case 0: customerLoggedIn = false; cout << "Logged out." << endl; break;
+            default: cout << "Invalid option." << endl;
+        }
+    } while (ch != 0);
+}
+
+void mainMenu() {
+    int ch;
+    do {
+        printHeader("STANDARD BANK MANAGEMENT SYSTEM");
+        cout << "1. Teller Login\n";
+        cout << "2. Customer Login\n";
+        cout << "3. Exit\n";
+        cout << "Choice: "; cin >> ch;
+
+        switch (ch) {
+            case 1: if (tellerLogin()) tellerMenu(); break;
+            case 2: if (customerLogin()) customerMenu(); break;
+            case 3: cout << "Goodbye!" << endl; break;
+            default: cout << "Invalid option." << endl;
+        }
+    } while (ch != 3);
+}
+
+int main() {
+    srand(time(0));
+    loadAllData();
+    initDefaultData();
+    mainMenu();
+    return 0;
+}
